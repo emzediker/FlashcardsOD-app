@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flashcards with Images (Favorites Only)</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 20px; background: #fff; color: #111; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  select, input[type=search], button { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 18px; min-height: 140px; position: relative; }
+  .front { font-weight: 600; }
+  .back { margin-top: 10px; display: none; }
+  .card img { max-width: 100%; height: auto; border-radius: 8px; margin-top: 8px; }
+  .fav { position: absolute; top: 10px; right: 10px; border: 1px solid #ddd; border-radius: 999px; padding: 6px 10px; background: #fff; cursor: pointer; }
+  .fav[aria-pressed="true"] { color: #e09b00; border-color: #caa14a; }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; color: #555; }
+  .nav { display: flex; gap: 8px; margin-top: 10px; }
+  .nav button { flex: 1; font-weight: 600; }
+  .note { margin-top: 10px; color: #666; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Optometry Flashcards — Image Demo</h1>
+
+  <div class="bar">
+    <label>Deck:
+      <select id="deck"></select>
+    </label>
+    <label>Show:
+      <select id="show">
+        <option value="all">All</option>
+        <option value="fav">Favorites</option>
+      </select>
+    </label>
+    <label>Search:
+      <input id="q" type="search" placeholder="Find text...">
+    </label>
+  </div>
+
+  <div class="card" id="card">
+    <div class="front" id="front"></div>
+    <div class="back" id="back"></div>
+    <button id="fav" class="fav" aria-pressed="false" title="Favorite">★</button>
+  </div>
+
+  <div class="meta">
+    <div id="counter">0 / 0</div>
+    <div id="status">Loaded…</div>
+  </div>
+
+  <div class="nav">
+    <button id="prev">◀ Prev</button>
+    <button id="flip">Flip</button>
+    <button id="next">Next ▶</button>
+  </div>
+
+  <div class="note">Tip: ←/→ to move, F to flip, S to star. Favorites are saved per device (local).</div>
+</div>
+
+<script>
+  // ---------- 5 SAMPLE IMAGE CARDS ----------
+  // Using placeholder photos from Unsplash Pics (safe to test).
+  // Replace the image URLs with your real images later (e.g., ./img/yourphoto.jpg)
+  const CARDS = [
+    {
+      id: "img-1",
+      deck: "Anterior Segment",
+      front: "<p>Identify this corneal finding:</p><img src='https://images.unsplash.com/photo-1550534791-2677533605a5?q=80&w=1200&auto=format&fit=crop' alt='Corneal surface example'>",
+      back: "<p><b>Corneal pannus</b> look-alike (demo image). In real use, replace with your clinical photo and caption.</p>"
+    },
+    {
+      id: "img-2",
+      deck: "Posterior Segment",
+      front: "<p>What condition is suggested by this fundus appearance?</p><img src='https://images.unsplash.com/photo-1530023367847-a683933f417e?q=80&w=1200&auto=format&fit=crop' alt='Fundus demo'>",
+      back: "<p><b>CRVO</b> pattern (demo) — 'blood and thunder' fundus with diffuse retinal hemorrhages. Replace image with real CRVO case.</p>"
+    },
+    {
+      id: "img-3",
+      deck: "Neuro-Ophthalmic Disease",
+      front: "<p>Which cranial nerve palsy best matches this gaze limitation?</p><img src='https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?q=80&w=1200&auto=format&fit=crop' alt='Eye movement demo'>",
+      back: "<p><b>CN VI palsy</b> (demo). Real card: include eye position images or motility chart.</p>"
+    },
+    {
+      id: "img-4",
+      deck: "Contact Lens",
+      front: "<p>Best lens type for irregular cornea (keratoconus)?</p><img src='https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=1200&auto=format&fit=crop' alt='Lens demo'>",
+      back: "<p><b>RGP or scleral lens</b> — improves optics over irregular corneal surface.</p>"
+    },
+    {
+      id: "img-5",
+      deck: "Glaucoma",
+      front: "<p>What visual field defect does this structural damage often cause?</p><img src='https://images.unsplash.com/photo-1501594907352-04cda38ebc29?q=80&w=1200&auto=format&fit=crop' alt='Optic disc demo'>",
+      back: "<p><b>Arcuate scotoma</b> — follows RNFL bundles arching from the disc (demo image).</p>"
+    }
+  ];
+
+  // ---------- App logic (same as your working version, with innerHTML) ----------
+  const els = {
+    deck: document.getElementById('deck'),
+    show: document.getElementById('show'),
+    q: document.getElementById('q'),
+    front: document.getElementById('front'),
+    back: document.getElementById('back'),
+    favBtn: document.getElementById('fav'),
+    prev: document.getElementById('prev'),
+    next: document.getElementById('next'),
+    flip: document.getElementById('flip'),
+    counter: document.getElementById('counter'),
+    status: document.getElementById('status'),
+    card: document.getElementById('card'),
+  };
+
+  const APP_KEY = 'fc_favs_v1::';
+  let currentDeck = null;
+  let favs = new Set();
+  let view = [];
+  let i = 0;
+  let flipped = false;
+
+  function key(deck){ return APP_KEY + deck; }
+  function loadFavs(deck){ try { return new Set(JSON.parse(localStorage.getItem(key(deck)) || '[]')); } catch { return new Set(); } }
+  function saveFavs(deck){ localStorage.setItem(key(deck), JSON.stringify(Array.from(favs))); }
+
+  function populateDecks(){
+    const decks = Array.from(new Set(CARDS.map(c => c.deck)));
+    els.deck.innerHTML = '';
+    decks.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d; opt.textContent = d;
+      els.deck.appendChild(opt);
+    });
+    currentDeck = decks[0];
+    els.deck.value = currentDeck;
+    favs = loadFavs(currentDeck);
+  }
+
+  function apply(){
+    const q = (els.q.value || '').toLowerCase();
+    const favOnly = els.show.value === 'fav';
+
+    view = CARDS.filter(c =>
+      (!currentDeck || c.deck === currentDeck) &&
+      (!q || (c.front + ' ' + c.back).toLowerCase().includes(q)) &&
+      (!favOnly || favs.has(c.id))
+    );
+
+    if (i >= view.length) i = Math.max(0, view.length - 1);
+    flipped = false;
+    render();
+  }
+
+  function render(){
+    if (view.length === 0){
+      els.front.innerHTML = '<em>No cards match.</em>';
+      els.back.style.display = 'none';
+      els.back.innerHTML = '';
+      els.favBtn.setAttribute('aria-pressed', 'false');
+      els.counter.textContent = '0 / 0';
+      els.status.textContent = `Deck: ${currentDeck}`;
+      return;
+    }
+    const c = view[i];
+    els.front.innerHTML = c.front;   // NOTE: innerHTML for images/formatting
+    els.back.innerHTML  = c.back;
+    els.back.style.display = flipped ? 'block' : 'none';
+    els.favBtn.setAttribute('aria-pressed', favs.has(c.id) ? 'true' : 'false');
+    els.counter.textContent = (i+1) + ' / ' + view.length;
+    els.status.textContent = `Deck: ${currentDeck}` + (els.show.value==='fav' ? ' (Favorites)' : '');
+  }
+
+  function next(){ if (!view.length) return; i = (i + 1) % view.length; flipped = false; render(); }
+  function prev(){ if (!view.length) return; i = (i - 1 + view.length) % view.length; flipped = false; render(); }
+  function flip(){ flipped = !flipped; render(); }
+  function toggleFav(){
+    if (!view.length) return;
+    const c = view[i];
+    if (favs.has(c.id)) favs.delete(c.id); else favs.add(c.id);
+    saveFavs(currentDeck); render();
+  }
+
+  // wire up
+  els.deck.onchange = () => { currentDeck = els.deck.value; favs = loadFavs(currentDeck); i = 0; apply(); };
+  els.show.onchange = apply;
+  els.q.oninput = apply;
+  els.prev.onclick = prev;
+  els.next.onclick = next;
+  els.flip.onclick = flip;
+  els.favBtn.onclick = toggleFav;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') next();
+    else if (e.key === 'ArrowLeft') prev();
+    else if (e.key.toLowerCase() === 'f') flip();
+    else if (e.key.toLowerCase() === 's') toggleFav();
+  });
+
+  // init
+  populateDecks();
+  apply();
+  els.status.textContent = 'Ready';
+</script>
+</body>
+</html>
